@@ -20,6 +20,16 @@ def back_to_main() -> InlineKeyboardMarkup:
     )
 
 
+def protocol_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🔒 WireGuard", callback_data="device:new:proto:wireguard")],
+            [InlineKeyboardButton("⚡ VLESS", callback_data="device:new:proto:vless")],
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:main")],
+        ]
+    )
+
+
 def devices_keyboard(devices: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for device in devices:
@@ -38,9 +48,25 @@ def devices_keyboard(devices: list[dict]) -> InlineKeyboardMarkup:
 
 def device_manage_keyboard(device: dict) -> InlineKeyboardMarkup:
     device_id = device["id"]
-    rows = [
-        [InlineKeyboardButton("🔄 Переиздать конфиг", callback_data=f"device:reissue:{device_id}")]
-    ]
+    rows = []
+    # Reissue rotates a WireGuard keypair — meaningless for VLESS, where the
+    # subscription link already reflects the device's current credential live (see
+    # DeviceService.reissue's explicit rejection for protocol=vless).
+    if device.get("protocol", "wireguard") == "wireguard":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "🔄 Переиздать конфиг", callback_data=f"device:reissue:{device_id}"
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "🔗 Ссылка подписки", callback_data=f"device:sublink:view:{device_id}"
+            )
+        ]
+    )
     if device["status"] == "active":
         rows.append(
             [InlineKeyboardButton("⏸️ Отключить", callback_data=f"device:disable:{device_id}")]
@@ -52,6 +78,19 @@ def device_manage_keyboard(device: dict) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton("🗑️ Удалить", callback_data=f"device:revoke:{device_id}")])
     rows.append([InlineKeyboardButton("⬅️ Мои устройства", callback_data="menu:devices")])
     return InlineKeyboardMarkup(rows)
+
+
+def subscription_link_keyboard(device_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔄 Обновить ссылку", callback_data=f"device:sublink:rotate:{device_id}"
+                )
+            ],
+            [InlineKeyboardButton("⬅️ К устройству", callback_data=f"device:manage:{device_id}")],
+        ]
+    )
 
 
 def plans_keyboard(plans: list[dict]) -> InlineKeyboardMarkup:

@@ -19,6 +19,7 @@ def test_production_with_real_secrets_is_accepted():
         telegram_webhook_secret="random-webhook-secret",
         payment_webhook_secret="random-payment-webhook-secret",
         vpn_agent_shared_secret="random-agent-secret",
+        xray_agent_shared_secret="random-xray-agent-secret",
     )
     assert settings.environment == "production"
 

@@ -1,11 +1,12 @@
 # VPN Service
 
 A commercial VPN service for users in Russia, controlled entirely through a Telegram bot:
-WireGuard under the hood, subscriptions and device management via chat, an admin panel for
-operators, and a Smart VPN mode where users pick which services go through the tunnel and
-which go direct.
+WireGuard and VLESS+Reality under the hood, subscriptions and device management via chat,
+an admin panel for operators, and a Smart VPN mode where users pick which services go
+through the tunnel and which go direct.
 
-No custom cryptography or VPN protocol — this is an orchestration layer around WireGuard.
+No custom cryptography or VPN protocol — this is an orchestration layer around stock
+WireGuard and stock Xray-core (VLESS+Reality).
 
 ## What's here
 
@@ -13,7 +14,8 @@ No custom cryptography or VPN protocol — this is an orchestration layer around
 |---|---|---|
 | `backend/` | Python 3.12, FastAPI, SQLAlchemy 2, PostgreSQL, Alembic | Control plane: REST API, business logic, database |
 | `bot/` | Python 3.12, python-telegram-bot | The primary user interface — everything a subscriber does happens in Telegram |
-| `vpn/` | Python 3.12, FastAPI | Runs **on each VPN exit server**; the only thing that touches the real WireGuard interface |
+| `vpn/` | Python 3.12, FastAPI | Runs **on each WireGuard exit server**; the only thing that touches the real WireGuard interface |
+| `xray-agent/` | Python 3.12, FastAPI | Runs **on each VLESS exit server**; the only thing that touches Xray-core's gRPC API — see docs/vless.md |
 | `frontend/` | Next.js 16, TypeScript, Tailwind CSS | Staff-only admin panel |
 | `infrastructure/` | Docker Compose, Ansible, GitHub Actions | Local dev stack, VPN server provisioning, CI/CD |
 
@@ -45,9 +47,10 @@ make create-admin email=you@example.com
 Each service also has its own local (non-Docker) workflow — useful for fast iteration:
 
 ```
-cd backend && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
-cd bot     && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
-cd vpn     && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+cd backend    && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+cd bot        && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+cd vpn        && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+cd xray-agent && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 cd frontend && npm install
 ```
 
@@ -57,10 +60,10 @@ repo root via each service's own `pydantic-settings`/`next.config.ts` config).
 Run the test suites:
 
 ```
-make test           # backend + bot + vpn, each in their own venv
+make test           # backend + bot + vpn + xray-agent, each in their own venv
 make e2e-smoke       # cross-service: real backend + vpn-agent processes, full user journey
-make lint            # ruff, all three Python services
-make typecheck       # mypy, all three Python services
+make lint            # ruff, all four Python services
+make typecheck       # mypy, all four Python services
 ```
 
 ## Environment variables
@@ -68,9 +71,10 @@ make typecheck       # mypy, all three Python services
 See [`.env.example`](.env.example) for the full list with comments. The short version:
 database/Redis URLs, `JWT_SECRET`/`ADMIN_SECRET`/`INTERNAL_SERVICE_TOKEN` (auth secrets),
 `TELEGRAM_BOT_TOKEN`, `PAYMENT_PROVIDER` + its credentials, `VPN_AGENT_SHARED_SECRET` +
-`VPN_DEFAULT_NETWORK`/`VPN_DNS`. In production, the backend/bot/vpn-agent all refuse to
-start if a secret is still at its placeholder value — see
-[`docs/security.md`](docs/security.md).
+`VPN_DEFAULT_NETWORK`/`VPN_DNS`, and `XRAY_AGENT_SHARED_SECRET` (VLESS — deliberately a
+separate secret from `VPN_AGENT_SHARED_SECRET`, see docs/vless.md). In production, the
+backend/bot/vpn-agent/xray-agent all refuse to start if a secret is still at its
+placeholder value — see [`docs/security.md`](docs/security.md).
 
 ## Database migrations
 
@@ -93,11 +97,14 @@ make makemigrations m="add foo"      # generate a new revision after changing ap
 - **Docker (everything)**: `make up` (core services) or `docker compose --profile frontend
   --profile monitoring up -d --build` (+ admin panel, + Prometheus/Grafana).
 
-## WireGuard server setup / provisioning
+## VPN exit server setup / provisioning
 
-VPN exit servers are provisioned separately from the control plane, via Ansible, since the
-vpn-agent needs direct access to a real network interface (not sensible inside the local
-dev Docker stack). See [`docs/wireguard.md`](docs/wireguard.md) for the full picture and
+VPN exit servers — both WireGuard and VLESS nodes — are provisioned separately from the
+control plane, via Ansible (`infrastructure/ansible/site.yml` has one play per protocol,
+targeting separate inventory host groups), since vpn-agent/xray-agent need direct access
+to real host resources (a network interface, a loopback gRPC port) not sensible inside
+the local dev Docker stack. See [`docs/wireguard.md`](docs/wireguard.md) /
+[`docs/vless.md`](docs/vless.md) for the full picture and
 [`docs/deployment.md`](docs/deployment.md) for the exact commands.
 
 ## Routing engine / Smart VPN
@@ -141,6 +148,11 @@ browsing history, no traffic content ever stored).
   `VPN_AGENT_SHARED_SECRET` matches between the backend and that specific agent.
   `docs/wireguard.md` covers the peer lifecycle if the agent is reachable but peers aren't
   behaving as expected.
+- **VLESS device provisioning fails with `xray_agent_unreachable`**: same shape as above,
+  but for the VLESS side — check `VLESSServerConfig.xray_agent_base_url`, that
+  `xray-agent.service` is running on that node, and that `XRAY_AGENT_SHARED_SECRET`
+  matches (it is deliberately a *different* secret from `VPN_AGENT_SHARED_SECRET`). See
+  docs/xray-agent.md.
 - **A payment webhook isn't activating a subscription**: check the webhook's `X-Signature`
   against `PAYMENT_WEBHOOK_SECRET`, and that the payment's `external_payment_id` actually
   matches a `Payment` row created by `POST /payments` — a webhook for an unknown payment
@@ -159,5 +171,7 @@ browsing history, no traffic content ever stored).
 - [`docs/deployment.md`](docs/deployment.md) — production deployment
 - [`docs/security.md`](docs/security.md) — security and privacy
 - [`docs/wireguard.md`](docs/wireguard.md) — WireGuard/vpn-agent internals
+- [`docs/vless.md`](docs/vless.md) — VLESS+Reality internals (backend side)
+- [`docs/xray-agent.md`](docs/xray-agent.md) — xray-agent service internals
 - [`docs/routing.md`](docs/routing.md) — Smart VPN / routing engine internals
 - [`tests/README.md`](tests/README.md) — cross-service integration test suite

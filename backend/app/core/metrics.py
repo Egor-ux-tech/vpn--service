@@ -30,6 +30,12 @@ VPN_PROVISIONING_ERRORS_TOTAL = Counter(
     ["operation"],
 )
 
+VLESS_PROVISIONING_ERRORS_TOTAL = Counter(
+    "vless_provisioning_errors_total",
+    "Errors while provisioning/mutating a VLESS user via xray-agent",
+    ["operation"],
+)
+
 DB_QUERY_DURATION_SECONDS = Histogram(
     "db_query_duration_seconds",
     "Database query latency in seconds, as observed by the SQLAlchemy engine",

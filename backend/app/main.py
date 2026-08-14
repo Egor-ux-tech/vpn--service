@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from starlette.responses import JSONResponse, Response
 
+from app.api.sub import router as subscription_delivery_router
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(api_router)
+    app.include_router(subscription_delivery_router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> JSONResponse:

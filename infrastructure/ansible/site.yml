@@ -13,3 +13,17 @@
     - wireguard
     - vpn-agent
     - node-exporter
+
+# Provisions a VLESS Reality exit node end to end: Xray-core + firewall, the xray-agent
+# control service, and node_exporter. A separate play/host group from vpn_servers above
+# — see docs/vless.md and docs/xray-agent.md. This playbook does NOT register the
+# server with the backend either — after it completes, take the printed Reality public
+# key and register the server + its VLESS config via the admin panel (see
+# docs/deployment.md).
+- name: Provision a VLESS Reality exit node
+  hosts: vless_servers
+  become: true
+  roles:
+    - xray
+    - xray-agent
+    - node-exporter

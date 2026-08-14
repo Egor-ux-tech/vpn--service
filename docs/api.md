@@ -16,6 +16,8 @@ The API has three distinct callers, each authenticated differently:
 | Admin panel | JWT Bearer token (from `/auth/admin/login`) | `Authorization: Bearer <token>` |
 | Payment provider webhook | HMAC signature over the raw request body | `X-Signature` |
 | vpn-agent (separate service, not part of this API) | HMAC signature + timestamp | `X-Signature`, `X-Timestamp` |
+| xray-agent (separate service, not part of this API — see docs/xray-agent.md) | HMAC signature + timestamp, distinct secret from vpn-agent's | `X-Signature`, `X-Timestamp` |
+| VPN client fetching a subscription (`GET /sub/{token}`, **not** under `/api/v1`) | The 256-bit bearer token *is* the credential — no header, it's the path itself | — |
 
 The bot never receives a per-user token — Telegram itself already authenticated the human
 before an update reaches the bot, so the bot only needs to prove *it* is the trusted bot
@@ -50,20 +52,42 @@ Admin endpoints are additionally role-gated (`AdminRole.SUPERADMIN` / `SUPPORT` 
 | `/plans` | Public plan catalog; admin: create/update plans |
 | `/subscriptions` | Own subscription history/active status, cancel |
 | `/devices` | Provision/list/reissue/disable/enable/revoke the caller's own devices |
+| `/devices/{id}/subscription-link` | Create-or-rotate / view metadata / revoke the caller's own subscription link — see docs/subscription-delivery.md |
 | `/vpn` | Current routing profile (AllowedIPs/DNS) for a device, on-demand refresh |
-| `/servers` | Public server list; admin: create/update/delete |
+| `/servers` | WireGuard server list (public); admin: create/update/delete |
+| `/vless-servers` | Admin-only: create/list/update/delete VLESS exit nodes — see docs/vless.md |
 | `/routing` | Public category catalog; own Smart VPN mode/categories/custom domains; admin: manage the domain catalog |
 | `/payments` | Create a payment, own payment history, provider webhook, admin: list all / refund |
 | `/support` | Create/view own tickets and messages; admin: list all, reply, close |
 | `/admin` | Dashboard aggregate stats, audit log |
 
+`/sub/{token}` is **not** under `/api/v1` — it's the public subscription-delivery endpoint
+(see docs/subscription-delivery.md), mounted directly on the app since it isn't part of the
+authenticated JSON API surface at all.
+
 ## Notable request/response flows
 
-**Device provisioning** (`POST /devices`) returns the WireGuard config and a QR code
-**exactly once** — the private key is generated on the vpn-agent, forwarded through the
-backend without being persisted, and handed to the caller in this single response. There is
-no "re-fetch my config" endpoint; `POST /devices/{id}/reissue` rotates to a brand-new
-keypair instead (see docs/wireguard.md).
+**Device provisioning** (`POST /devices`, body includes `protocol: "wireguard" | "vless"`,
+defaulting to `"wireguard"`) returns the WireGuard config and a QR code **exactly once**
+for `protocol=wireguard` — the private key is generated on the vpn-agent, forwarded
+through the backend without being persisted, and handed to the caller in this single
+response. There is no "re-fetch my private key" endpoint; `POST /devices/{id}/reissue`
+rotates to a brand-new keypair instead (see docs/wireguard.md) — and is rejected outright
+(422, `reissue_not_supported_for_protocol`) for VLESS devices, since there is no
+per-provisioning artifact to re-issue there (see below). The same response also includes a
+`subscription_url` (and its own QR) for the device's auto-created subscription link — that
+one *is* re-fetchable later via `GET /sub/{token}`, just without a private key in it (see
+docs/subscription-delivery.md for why).
+
+For `protocol=vless`, `config_text`/`qr_code_base64` are `null` — there is no separate
+downloadable artifact; the subscription link fetched live via `GET /sub/{token}` *is* the
+config. See docs/vless.md for the full data flow and docs/xray-agent.md for the node-side
+service that actually provisions the VLESS user.
+
+**Subscription links** (`GET /sub/{token}`) are the repeatedly-fetchable counterpart to the
+one-time provisioning response above. The token is bearer-auth by itself (no header), so
+every failure mode — never issued, revoked, billing lapsed, device disabled — returns the
+identical generic 404; see docs/subscription-delivery.md for the full security model.
 
 **Payments** (`POST /payments`) never activates a subscription directly — it returns a
 `checkout_url`/pending status, and only `POST /payments/webhook`, signature-verified and

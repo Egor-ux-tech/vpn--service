@@ -1,0 +1,17 @@
+// Vendored, verbatim from XTLS/Xray-core's common/serial/typed_message.proto
+// (fetched from github.com/XTLS/Xray-core@main — see docs/xray-agent.md's
+// "gRPC integration" section for the verification note). Not trimmed: this file is
+// tiny and used as-is.
+syntax = "proto3";
+
+package xray.common.serial;
+
+option go_package = "github.com/xtls/xray-core/common/serial";
+
+// TypedMessage is a serialized proto message along with its type name.
+message TypedMessage {
+  // The name of the message type, retrieved from protobuf API.
+  string type = 1;
+  // Serialized proto message.
+  bytes value = 2;
+}

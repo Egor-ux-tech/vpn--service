@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.logging import get_logger, request_id_ctx
+from app.core.logging import get_logger, request_id_ctx, safe_request_path
 from app.core.metrics import API_ERRORS_TOTAL, HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL
 
 logger = get_logger("http")
@@ -66,7 +66,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         logger.info(
             "request_completed",
             method=request.method,
-            path=request.url.path,
+            path=safe_request_path(request.url.path),
             status_code=response.status_code,
             duration_ms=duration_ms,
         )

@@ -33,6 +33,13 @@ def test_non_sensitive_keys_pass_through_unchanged():
     assert result == event_dict
 
 
+def test_vless_related_keys_are_in_the_redact_list():
+    assert "vless_uuid" in _REDACT_KEYS
+    assert "uuid" in _REDACT_KEYS
+    assert "reality_private_key" in _REDACT_KEYS
+    assert "xray_agent_shared_secret" in _REDACT_KEYS
+
+
 def test_redaction_only_matches_key_names_not_value_contents():
     """A documented boundary, not a bug: redaction is key-based (safe, no false
     positives/negatives from guessing at free text), so a secret embedded in an unrelated

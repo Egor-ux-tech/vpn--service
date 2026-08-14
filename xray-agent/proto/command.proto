@@ -1,0 +1,65 @@
+// TRIMMED, wire-compatible subset of XTLS/Xray-core's
+// app/proxyman/command/command.proto (fetched from github.com/XTLS/Xray-core@main —
+// see docs/xray-agent.md's "gRPC integration" section for the verification note).
+//
+// The real HandlerService also exposes AddInbound/RemoveInbound/ListInbounds/
+// AddOutbound/RemoveOutbound/AlterOutbound/ListOutbounds, whose request/response
+// messages reference core.InboundHandlerConfig/core.OutboundHandlerConfig — Xray's
+// full runtime config schema, a large transitive dependency graph unrelated to VLESS
+// user lifecycle management. xray-agent only ever calls AlterInbound (to run
+// AddUserOperation/RemoveUserOperation on the already-running "vless-reality-in"
+// inbound — see the Ansible-templated Xray config in
+// infrastructure/ansible/roles/xray), GetInboundUsers, and GetInboundUsersCount, so
+// only those RPCs and their message types are declared here. gRPC dispatches by exact
+// "/package.Service/Method" path and each message's wire format is defined solely by
+// its own field numbers — a client stub that only declares a subset of a service's
+// RPCs is fully wire-compatible with the real server for the calls it does make; this
+// is standard practice for partial/hand-scoped gRPC clients against large services.
+syntax = "proto3";
+
+package xray.app.proxyman.command;
+
+option go_package = "github.com/xtls/xray-core/app/proxyman/command";
+
+import "user.proto";
+import "typed_message.proto";
+
+message AddUserOperation {
+  xray.common.protocol.User user = 1;
+}
+
+message RemoveUserOperation {
+  string email = 1;
+}
+
+message AlterInboundRequest {
+  string tag = 1;
+  xray.common.serial.TypedMessage operation = 2;
+}
+
+message AlterInboundResponse {}
+
+message GetInboundUserRequest {
+  string tag = 1;
+  string email = 2;
+}
+
+message GetInboundUserResponse {
+  repeated xray.common.protocol.User users = 1;
+}
+
+message GetInboundUsersCountResponse {
+  int64 count = 1;
+}
+
+service HandlerService {
+  // Runs AddUserOperation/RemoveUserOperation (serialized into `operation` as a
+  // TypedMessage) against the live inbound named by `tag` — no config rewrite, no
+  // restart. See docs/xray-agent.md.
+  rpc AlterInbound(AlterInboundRequest) returns (AlterInboundResponse) {}
+
+  // Empty `email` in the request returns every user currently on the inbound.
+  rpc GetInboundUsers(GetInboundUserRequest) returns (GetInboundUserResponse) {}
+
+  rpc GetInboundUsersCount(GetInboundUserRequest) returns (GetInboundUsersCountResponse) {}
+}

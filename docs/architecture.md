@@ -9,6 +9,7 @@ The service has five independently deployable components:
 | `backend`  | Python 3.12 / FastAPI               | Control plane: REST API, business logic, database, orchestration   |
 | `bot`      | Python 3.12 / python-telegram-bot   | User-facing Telegram UX, thin client of the backend API            |
 | `vpn`      | Python 3.12 / FastAPI ("vpn-agent") | Data plane: runs **on each WireGuard server**, manages `wg` peers  |
+| `xray-agent` | Python 3.12 / FastAPI             | Data plane: runs **on each VLESS server**, manages Xray-core VLESS users — see docs/vless.md, docs/xray-agent.md |
 | `frontend` | Next.js / TypeScript / Tailwind     | Admin panel (staff-only)                                           |
 | `infrastructure` | Docker Compose / Ansible / GH Actions | Local dev environment, server provisioning, CI/CD            |
 
@@ -26,10 +27,23 @@ The service has five independently deployable components:
 │      bot      │───────────────────────────────────┘
 └──────────────┘
 
-                                        backend ──HTTPS(HMAC)──▶ vpn-agent (per server)
+                                        backend ──HTTPS(HMAC)──▶ vpn-agent (per WG server)
                                                                     │ wg / ip / nft (root)
                                                                     ▼
                                                              WireGuard interface
+
+                                        backend ──HTTPS(HMAC,        xray-agent (per VLESS
+                                                    distinct secret)──▶  server)
+                                                                    │ gRPC (loopback only)
+                                                                    ▼
+                                                             Xray-core (VLESS Reality)
+
+┌──────────────┐  HTTP GET /sub/{token}  ┌───────────────────────────┐
+│  VPN client   │────────────────────────▶│  backend (subscription    │
+│ (WireGuard,   │  bearer token in path,  │   delivery — see          │
+│  Happ/VLESS)  │  no other auth          │   docs/subscription-      │
+└──────────────┘                         │   delivery.md)             │
+                                          └───────────────────────────┘
 ```
 
 The **bot never talks to the database directly** — it is a thin client of the backend's
@@ -118,23 +132,42 @@ uses the pushed `VPN_DNS` resolvers, which limits DNS-leak exposure for the traf
 supposed to be private, while non-VPN domains resolve exactly as they would without the
 service running.
 
-## 5. Data model
+## 5. Subscription delivery
+
+A **subscription link** (`GET /sub/{token}`) is a stable, repeatedly-fetchable URL a VPN
+client uses to pull a device's current config, instead of (or alongside) the bot's one-time
+Telegram push. Distinct from — and not to be confused with — the billing `Subscription`
+model above; see [`docs/subscription-delivery.md`](subscription-delivery.md) for the full
+design, including the deliberate Phase 1 limitation around WireGuard private keys never
+being persisted, and what's still open before a `HappFormatter` can be built.
+
+In brief: `SubscriptionDeliveryService` resolves a bearer token (256-bit opaque, stored only
+as a hash), re-validates the underlying device/billing/peer state on every fetch, and hands
+off to a `SubscriptionFormatter` (`WireGuardFormatter` for WireGuard devices) or, for
+VLESS devices, a dedicated `VLESSFormatter` dispatch path — see section 9 below and
+docs/vless.md. This layer is additive — it reads and composes state `DeviceService`/
+`RoutingService`/`WireGuardProvider` already produce, and changes nothing about how
+peers are actually provisioned.
+
+## 6. Data model
 
 See [`docs/api.md`](api.md) for the endpoint surface and the SQLAlchemy models under
 `backend/app/models/` for the authoritative schema (managed via Alembic migrations, never
 hand-edited in production).
 
-## 6. Trust boundaries / privacy
+## 7. Trust boundaries / privacy
 
 - The backend stores **metadata required to operate the service** (which server a device is
   on, its assigned IP, subscription state, which routing *categories* are enabled) — it does
   **not** log or store the content of user traffic, nor a history of visited sites. Routing
   rules describe "this category goes via VPN," not "user visited X at time Y."
 - Private keys exist in memory only for the duration of a single provisioning request/response
-  and are never written to logs or the database.
+  and are never written to logs or the database. This is also why a subscription link's
+  WireGuard config never includes one on a later fetch — see
+  [`docs/subscription-delivery.md`](subscription-delivery.md).
 - See [`docs/security.md`](security.md) for the full threat model and hardening checklist.
 
-## 7. Why these boundaries
+## 8. Why these boundaries
 
 - **Bot as thin client** — keeps exactly one implementation of "can this user add a 6th
   device," reachable and testable via the same HTTP API used by the admin panel.
@@ -144,3 +177,19 @@ hand-edited in production).
 - **Provider interfaces for VPN and payments** — MVP ships WireGuard + a mock/manual payment
   provider, but the interfaces exist so a second VPN transport or a real payment gateway
   (YooKassa, Cryptomus, Stripe) is a new adapter, not a rewrite.
+- **Formatter interface for subscription delivery** — same reasoning as the VPN provider
+  interface above: a new client type is a new formatter, not a change to token handling,
+  authorization, or rate limiting.
+
+## 9. VLESS — a second protocol
+
+VLESS + Reality is a second, parallel VPN transport alongside WireGuard, deployed the
+same way conceptually (a small privileged-adjacent agent — `xray-agent` — runs on each
+exit node and reconciles it to backend-desired state) but with its own provider
+interface, subscription formatter, and database tables rather than being forced into
+WireGuard's. See [`docs/vless.md`](vless.md) for the full design (data flow, schema,
+formatter grammar, multi-node readiness, failure scenarios) and
+[`docs/xray-agent.md`](xray-agent.md) for the xray-agent service itself (gRPC
+integration, reconciliation, security model). `vpn-agent` was not modified to build
+this — the two agent types are deliberately independent deployables, not a shared
+abstraction, until a genuine third protocol makes the real commonalities visible.

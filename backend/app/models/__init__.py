@@ -14,8 +14,11 @@ from app.models.routing import (
     UserRoutingProfile,
 )
 from app.models.subscription import Subscription
+from app.models.subscription_link import SubscriptionLink
 from app.models.support import SupportMessage, SupportTicket
 from app.models.user import User
+from app.models.vless_credential import VLESSCredential
+from app.models.vless_server_config import VLESSServerConfig
 from app.models.vpn_peer import VPNPeer
 from app.models.vpn_profile import VPNProfile
 from app.models.vpn_server import VPNServer
@@ -36,9 +39,12 @@ __all__ = [
     "UserCustomDomain",
     "UserRoutingProfile",
     "Subscription",
+    "SubscriptionLink",
     "SupportMessage",
     "SupportTicket",
     "User",
+    "VLESSCredential",
+    "VLESSServerConfig",
     "VPNPeer",
     "VPNProfile",
     "VPNServer",

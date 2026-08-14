@@ -29,8 +29,11 @@ from app.handlers.devices import (
     device_manage_callback,
     device_name_message_handler,
     device_new_callback,
+    device_new_protocol_callback,
     device_reissue_callback,
     device_revoke_callback,
+    device_subscription_link_rotate_callback,
+    device_subscription_link_view_callback,
     devices_list_callback,
 )
 from app.handlers.profile import profile_callback
@@ -89,7 +92,13 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(smart_vpn_menu_callback, pattern="^menu:smart$"))
     application.add_handler(CallbackQueryHandler(support_menu_callback, pattern="^menu:support$"))
 
-    # Devices
+    # Devices — the protocol-choice handler is registered before the general
+    # "^device:new" one, since PTB dispatches within a group to the first handler whose
+    # pattern matches and "device:new:proto:wireguard"/"device:new:proto:vless" would
+    # otherwise also match device_new_callback's broader pattern.
+    application.add_handler(
+        CallbackQueryHandler(device_new_protocol_callback, pattern="^device:new:proto:")
+    )
     application.add_handler(CallbackQueryHandler(device_new_callback, pattern="^device:new"))
     application.add_handler(CallbackQueryHandler(device_manage_callback, pattern="^device:manage:"))
     application.add_handler(
@@ -100,6 +109,16 @@ def build_application() -> Application:
     )
     application.add_handler(CallbackQueryHandler(device_enable_callback, pattern="^device:enable:"))
     application.add_handler(CallbackQueryHandler(device_revoke_callback, pattern="^device:revoke:"))
+    application.add_handler(
+        CallbackQueryHandler(
+            device_subscription_link_view_callback, pattern="^device:sublink:view:"
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            device_subscription_link_rotate_callback, pattern="^device:sublink:rotate:"
+        )
+    )
 
     # Subscription / payments
     application.add_handler(CallbackQueryHandler(buy_plan_callback, pattern="^plan:buy:"))

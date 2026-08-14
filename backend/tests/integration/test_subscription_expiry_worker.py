@@ -12,7 +12,10 @@ from app.repositories.routing_repository import (
     UserCustomDomainRepository,
     UserRoutingProfileRepository,
 )
+from app.repositories.subscription_link_repository import SubscriptionLinkRepository
 from app.repositories.subscription_repository import SubscriptionRepository
+from app.repositories.vless_credential_repository import VLESSCredentialRepository
+from app.repositories.vless_server_config_repository import VLESSServerConfigRepository
 from app.repositories.vpn_peer_repository import VPNPeerRepository
 from app.repositories.vpn_profile_repository import VPNProfileRepository
 from app.repositories.vpn_server_repository import VPNServerRepository
@@ -21,10 +24,11 @@ from app.services.device_service import DeviceService
 from app.services.routing.dns_resolver import DomainResolver
 from app.services.routing.engine import RoutingEngine
 from app.services.routing_service import RoutingService
+from app.services.subscription_link_service import SubscriptionLinkService
 from app.services.subscription_service import SubscriptionService
 from app.services.vpn_server_service import VPNServerService
 from app.workers.subscription_expiry import SubscriptionExpiryWorker
-from tests.fakes import FakeVPNProvider
+from tests.fakes import FakeVPNProvider, FakeXrayAgentProvider
 
 
 class _RecordingNotifier:
@@ -96,6 +100,11 @@ async def test_expiry_worker_expires_subscription_disables_devices_and_notifies(
         server_service,
         routing_service,
         provider,
+        SubscriptionLinkService(SubscriptionLinkRepository(db_session)),
+        "http://localhost:8000",
+        VLESSCredentialRepository(db_session),
+        VLESSServerConfigRepository(db_session),
+        FakeXrayAgentProvider(),
     )
 
     device_result = await device_service.provision(
@@ -150,6 +159,11 @@ async def test_expiry_worker_is_a_no_op_when_nothing_expired(db_session, sample_
         server_service,
         routing_service,
         FakeVPNProvider(),
+        SubscriptionLinkService(SubscriptionLinkRepository(db_session)),
+        "http://localhost:8000",
+        VLESSCredentialRepository(db_session),
+        VLESSServerConfigRepository(db_session),
+        FakeXrayAgentProvider(),
     )
     worker = SubscriptionExpiryWorker(
         subscription_service=SubscriptionService(SubscriptionRepository(db_session)),

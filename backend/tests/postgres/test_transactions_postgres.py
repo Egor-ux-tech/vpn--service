@@ -25,7 +25,10 @@ from app.repositories.routing_repository import (
     UserCustomDomainRepository,
     UserRoutingProfileRepository,
 )
+from app.repositories.subscription_link_repository import SubscriptionLinkRepository
 from app.repositories.subscription_repository import SubscriptionRepository
+from app.repositories.vless_credential_repository import VLESSCredentialRepository
+from app.repositories.vless_server_config_repository import VLESSServerConfigRepository
 from app.repositories.vpn_peer_repository import VPNPeerRepository
 from app.repositories.vpn_profile_repository import VPNProfileRepository
 from app.repositories.vpn_server_repository import VPNServerRepository
@@ -33,9 +36,10 @@ from app.services.device_service import DeviceService
 from app.services.routing.dns_resolver import DomainResolver
 from app.services.routing.engine import RoutingEngine
 from app.services.routing_service import RoutingService
+from app.services.subscription_link_service import SubscriptionLinkService
 from app.services.vpn import ip_allocator as ip_allocator_module
 from app.services.vpn_server_service import VPNServerService
-from tests.fakes import FakeVPNProvider
+from tests.fakes import FakeVPNProvider, FakeXrayAgentProvider
 
 
 async def test_commit_persists_and_is_visible_on_a_separate_connection(
@@ -113,6 +117,11 @@ def _build_device_service(session: AsyncSession, provider: FakeVPNProvider) -> D
         VPNServerService(VPNServerRepository(session)),
         routing_service,
         provider,
+        SubscriptionLinkService(SubscriptionLinkRepository(session)),
+        "http://localhost:8000",
+        VLESSCredentialRepository(session),
+        VLESSServerConfigRepository(session),
+        FakeXrayAgentProvider(),
     )
 
 

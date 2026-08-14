@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.logging import get_logger, request_id_ctx
+from app.core.logging import get_logger, request_id_ctx, safe_request_path
 
 logger = get_logger(__name__)
 
@@ -89,7 +89,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         logger.warning(
             "app_error",
-            path=request.url.path,
+            path=safe_request_path(request.url.path),
             error_code=exc.error_code,
             message=exc.message,
         )
@@ -121,7 +121,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         logger.error(
             "unhandled_exception",
-            path=request.url.path,
+            path=safe_request_path(request.url.path),
             request_id=_request_id_for(request),
             exc_info=exc,
         )

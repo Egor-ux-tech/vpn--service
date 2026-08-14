@@ -1,0 +1,75 @@
+---
+- name: Install Python and git
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the xray-agent system user (no login, no home)
+  ansible.builtin.user:
+    name: xray-agent
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create state directory
+  ansible.builtin.file:
+    path: /var/lib/xray-agent
+    state: directory
+    owner: xray-agent
+    group: xray-agent
+    mode: "0750"
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/xray-agent
+    state: directory
+    mode: "0750"
+    owner: xray-agent
+    group: xray-agent
+
+- name: Clone/update the vpn-service repository
+  ansible.builtin.git:
+    repo: "{{ vpn_service_repo_url }}"
+    dest: /opt/vpn-service
+    version: "{{ vpn_service_git_ref }}"
+    force: false
+  notify: Restart xray-agent
+
+- name: Create the xray-agent virtualenv and install the package
+  ansible.builtin.pip:
+    name: /opt/vpn-service/xray-agent
+    virtualenv: /opt/vpn-service/xray-agent/.venv
+    virtualenv_command: python3 -m venv
+  notify: Restart xray-agent
+
+- name: Render the xray-agent environment file
+  ansible.builtin.template:
+    src: xray-agent.env.j2
+    dest: /etc/xray-agent/xray-agent.env
+    owner: xray-agent
+    group: xray-agent
+    mode: "0640"
+  no_log: true
+  notify: Restart xray-agent
+
+- name: Install the xray-agent systemd unit
+  ansible.builtin.template:
+    src: xray-agent.service.j2
+    dest: /etc/systemd/system/xray-agent.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart xray-agent
+
+- name: Enable and start xray-agent
+  ansible.builtin.systemd:
+    name: xray-agent
+    enabled: true
+    state: started
+    daemon_reload: true

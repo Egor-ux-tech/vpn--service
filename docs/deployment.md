@@ -4,9 +4,12 @@ The service has two deployment targets that are provisioned differently:
 
 - **Control plane** (backend, bot, frontend, Postgres, Redis, Prometheus, Grafana) — runs
   as Docker containers, typically on a single small VPS or a container platform.
-- **VPN exit servers** (WireGuard + vpn-agent + node_exporter) — provisioned with Ansible,
-  running natively (not in Docker) since the vpn-agent needs direct access to the host's
-  network namespace to manage a real `wg0` interface. See docs/wireguard.md.
+- **VPN exit servers** — two independent flavors, both provisioned with Ansible, running
+  natively (not in Docker):
+  - **WireGuard nodes** (WireGuard + vpn-agent + node_exporter), needing direct access
+    to the host's network namespace to manage a real `wg0` interface. See docs/wireguard.md.
+  - **VLESS nodes** (Xray-core + xray-agent + node_exporter). See docs/vless.md and
+    docs/xray-agent.md.
 
 These are independent: you can run one control plane against any number of exit servers in
 different countries, added/removed without touching the control plane's deployment.
@@ -139,31 +142,43 @@ systemctl enable --now vpn-expiry.timer
 
 ## VPN exit servers
 
-See docs/wireguard.md for the full Ansible-based provisioning flow
-(`infrastructure/ansible/site.yml`). Summary:
+`infrastructure/ansible/site.yml` has **two independent plays** — one per host group, so
+a single inventory can provision both WireGuard and VLESS nodes (or just one kind):
 
 ```
 cd infrastructure/ansible
-cp inventory/hosts.ini.example inventory/hosts.ini      # real hosts
-cp group_vars/all.yml.example group_vars/all.yml        # real secrets — must match
-                                                          # the control plane's
-                                                          # VPN_AGENT_SHARED_SECRET
+cp inventory/hosts.ini.example inventory/hosts.ini      # real hosts, both [vpn_servers]
+                                                          # and [vless_servers] groups
+cp group_vars/all.yml.example group_vars/all.yml        # real secrets — must match the
+                                                          # control plane's
+                                                          # VPN_AGENT_SHARED_SECRET AND
+                                                          # XRAY_AGENT_SHARED_SECRET
 ansible-playbook -i inventory/hosts.ini site.yml
 ```
 
-After it completes, register each server via the admin panel (Servers page) or
-`POST /api/v1/servers`, using the public key the playbook printed, then flip its status to
-`online`. A server that isn't `online` is never selected for new device provisioning.
+**WireGuard nodes** (`[vpn_servers]`) — see docs/wireguard.md. After the run completes,
+register each server via the admin panel (Servers page) or `POST /api/v1/servers`, using
+the public key the playbook printed, then flip its status to `online`.
 
-Add each new exit server's `vpn-agent:8800/metrics` and `:9100` (node_exporter) targets to
-`infrastructure/monitoring/prometheus/prometheus.yml`'s `vpn-agent`/`node` scrape jobs and
-reload/restart the `prometheus` container.
+**VLESS nodes** (`[vless_servers]`) — see docs/vless.md and docs/xray-agent.md. After the
+run completes, register each node via `POST /api/v1/vless-servers` using the **Reality
+public key** the playbook printed (never the private key, which never leaves the node),
+then flip its status to `online`.
+
+A server that isn't `online` (of either protocol) is never selected for new device
+provisioning.
+
+Add each new exit server's metrics endpoints — `vpn-agent:8800/metrics` or
+`xray-agent:8801/metrics`, plus `:9100` (node_exporter) on both — to
+`infrastructure/monitoring/prometheus/prometheus.yml`'s scrape jobs and reload/restart the
+`prometheus` container.
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/`) runs, per service, on every push/PR that touches it:
-dependency install → Ruff → mypy → pytest (+ coverage) → `pip-audit`/`npm audit` → a Docker
-build of that service's image. `e2e.yml` additionally runs the cross-service smoke test
+GitHub Actions (`.github/workflows/`) runs, per service (backend, bot, vpn-agent,
+xray-agent, frontend), on every push/PR that touches it: dependency install → Ruff →
+mypy → pytest (+ coverage) → `pip-audit`/`npm audit` → a Docker build of that service's
+image. `e2e.yml` additionally runs the cross-service smoke test
 (`tests/`, see its own README) whenever backend, vpn-agent, bot, or the shared tests change.
 `security.yml` scans every push/PR for committed secrets (gitleaks). `backend.yml` also runs
 a dedicated `postgres` job against a real `postgres:16-alpine` service container — see
@@ -212,6 +227,14 @@ authorized workflow.
   not essential to back up separately, but losing it means peers won't reconcile until the
   backend re-pushes them (e.g. via a manual re-provisioning pass), so treat this as a minor
   operational inconvenience, not a data-loss risk.
+- **Reality private key** (`/etc/xray/reality_private_key` on each VLESS node): losing
+  this means re-provisioning that node and re-registering its (new) public key — every
+  existing VLESS user on that node would need a fresh subscription-link fetch to pick up
+  the new key (no reissue step required, since the subscription link is live-fetched —
+  see docs/vless.md). Worth including in your server backup/snapshot policy if you want to
+  avoid the disruption.
+- **xray-agent's `state.db`**: same story as vpn-agent's — rebuildable from the backend's
+  `vless_credentials` table, not essential to back up separately.
 
 ## Scaling notes (beyond MVP)
 

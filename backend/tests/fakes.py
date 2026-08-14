@@ -1,12 +1,14 @@
-"""In-memory test doubles — no network calls, no real WireGuard/Postgres involved."""
+"""In-memory test doubles — no network calls, no real WireGuard/Postgres/Xray involved."""
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from app.models.device import Device
 from app.models.enums import VPNPeerStatus
+from app.models.vless_server_config import VLESSServerConfig
 from app.models.vpn_peer import VPNPeer
 from app.models.vpn_server import VPNServer
+from app.services.vless.provider import VLESSUserRecord
 from app.services.vpn.provider import PeerProvisioningResult, PeerStatus
 
 
@@ -75,6 +77,54 @@ class FakeVPNProvider:
             f"[Peer]\nPublicKey = {server_public_key}\nEndpoint = {server_endpoint}\n"
             f"AllowedIPs = {allowed}\n"
         )
+
+
+@dataclass
+class FakeXrayAgentProvider:
+    """Stands in for HttpXrayAgentProvider in tests: tracks VLESS users locally instead
+    of calling a real xray-agent over HTTP."""
+
+    users: dict[str, VLESSUserRecord] = field(default_factory=dict)  # uuid -> record
+    created: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    rotated: list[tuple[str, str]] = field(default_factory=list)
+
+    async def create_user(
+        self, *, server_config: VLESSServerConfig, uuid: str, device_id: int, flow: str
+    ) -> VLESSUserRecord:
+        record = VLESSUserRecord(
+            uuid=uuid, device_id=device_id, flow=flow, created_at=datetime.now(UTC), rotated_at=None
+        )
+        self.users[uuid] = record
+        self.created.append(uuid)
+        return record
+
+    async def remove_user(self, *, server_config: VLESSServerConfig, uuid: str) -> None:
+        self.users.pop(uuid, None)
+        self.removed.append(uuid)
+
+    async def rotate_user(
+        self, *, server_config: VLESSServerConfig, uuid: str, new_uuid: str
+    ) -> VLESSUserRecord:
+        old = self.users.pop(uuid, None)
+        device_id = old.device_id if old is not None else 0
+        flow = old.flow if old is not None else "xtls-rprx-vision"
+        record = VLESSUserRecord(
+            uuid=new_uuid,
+            device_id=device_id,
+            flow=flow,
+            created_at=old.created_at if old is not None else datetime.now(UTC),
+            rotated_at=datetime.now(UTC),
+        )
+        self.users[new_uuid] = record
+        self.rotated.append((uuid, new_uuid))
+        return record
+
+    async def list_users(self, *, server_config: VLESSServerConfig) -> list[VLESSUserRecord]:
+        return list(self.users.values())
+
+    async def health_check(self, *, server_config: VLESSServerConfig) -> bool:
+        return True
 
 
 class FakeDomainResolver:

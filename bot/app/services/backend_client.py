@@ -123,13 +123,17 @@ class BackendClient:
         return await self._request("GET", "/api/v1/devices", telegram_id=telegram_id)
 
     async def create_device(
-        self, telegram_id: int, name: str, server_id: int | None = None
+        self,
+        telegram_id: int,
+        name: str,
+        server_id: int | None = None,
+        protocol: str = "wireguard",
     ) -> dict:
         return await self._request(
             "POST",
             "/api/v1/devices",
             telegram_id=telegram_id,
-            json={"name": name, "server_id": server_id},
+            json={"name": name, "server_id": server_id, "protocol": protocol},
         )
 
     async def reissue_device(self, telegram_id: int, device_id: int) -> dict:
@@ -150,6 +154,27 @@ class BackendClient:
     async def revoke_device(self, telegram_id: int, device_id: int) -> dict:
         return await self._request(
             "DELETE", f"/api/v1/devices/{device_id}", telegram_id=telegram_id
+        )
+
+    # ---- Subscription link (distinct from the billing "subscription" above — see
+    # docs/subscription-delivery.md) ----
+
+    async def get_subscription_link(self, telegram_id: int, device_id: int) -> dict | None:
+        try:
+            return await self._request(
+                "GET", f"/api/v1/devices/{device_id}/subscription-link", telegram_id=telegram_id
+            )
+        except BackendError as exc:
+            if exc.error_code == "subscription_link_not_found":
+                return None
+            raise
+
+    async def create_or_rotate_subscription_link(self, telegram_id: int, device_id: int) -> dict:
+        """Creates the link if the device has none yet, or rotates it (new token, old one
+        dies immediately) if it does. The response's plaintext URL/QR is only ever
+        available in this one response — see the backend's SubscriptionLinkService."""
+        return await self._request(
+            "POST", f"/api/v1/devices/{device_id}/subscription-link", telegram_id=telegram_id
         )
 
     # ---- Servers ----

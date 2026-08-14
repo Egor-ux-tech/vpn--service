@@ -13,6 +13,7 @@ _INSECURE_DEFAULTS = {
     "telegram_webhook_secret": "change-me",
     "payment_webhook_secret": "change-me",
     "vpn_agent_shared_secret": "change-me-vpn-agent-secret",
+    "xray_agent_shared_secret": "change-me-xray-agent-secret",
 }
 
 
@@ -51,7 +52,19 @@ class Settings(BaseSettings):
     vpn_agent_shared_secret: str = "change-me-vpn-agent-secret"
     vpn_agent_port: int = 8800
 
+    # Deliberately its own secret, distinct from vpn_agent_shared_secret — a compromised
+    # WireGuard-node credential must not let an attacker reach a VLESS node's xray-agent
+    # or vice versa. See docs/xray-agent.md.
+    xray_agent_shared_secret: str = "change-me-xray-agent-secret"
+
     rate_limit_default: str = "100/minute"
+    # Deliberately separate from api_base_url: the subscription URL is handed to
+    # third-party VPN clients (WireGuard apps, Happ, ...) and must point at whatever
+    # public-facing domain Caddy terminates TLS for (see docker-compose.prod.yml) — never
+    # hardcoded, never assumed to be the same host/path a browser or the bot would use to
+    # reach the JSON API.
+    subscription_base_url: str = "http://localhost:8000"
+    subscription_link_rate_limit: str = "30/minute"
 
     @property
     def is_production(self) -> bool:

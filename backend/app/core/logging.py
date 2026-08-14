@@ -19,6 +19,23 @@ _REDACT_KEYS = {
     "secret",
     "payment_provider_key",
     "webhook_secret",
+    # A rendered WireGuard config is exactly as sensitive as the private key it contains
+    # (see wireguard_formatter.py) — the bot and vpn-agent's own _REDACT_KEYS already
+    # include this; added here for consistency now that the backend also handles
+    # subscription-link tokens and rendered config content directly.
+    "config_text",
+    "subscription_token",
+    "subscription_url",
+    # A VLESS UUID is a bearer credential (anyone holding it can connect as that user —
+    # see docs/vless.md), exactly as sensitive as a WireGuard private key.
+    "vless_uuid",
+    "uuid",
+    # Defensive: the Reality private key never reaches this codebase (it lives only on
+    # the VLESS node's filesystem — see docs/xray-agent.md) and xray_agent_shared_secret
+    # is already caught by the generic "secret" entry above, but both are listed
+    # explicitly for the same belt-and-suspenders reason config_text is.
+    "reality_private_key",
+    "xray_agent_shared_secret",
 }
 
 
@@ -27,6 +44,18 @@ def _redact_sensitive(_logger: Any, _method_name: str, event_dict: Any) -> Any:
         if key.lower() in _REDACT_KEYS:
             event_dict[key] = "***REDACTED***"
     return event_dict
+
+
+def safe_request_path(path: str) -> str:
+    """Masks known secret-bearing path segments before they reach a log line. Currently
+    just GET /sub/{token} (see app/api/sub.py) — the subscription-delivery token is a
+    bearer credential embedded directly in the URL path, so `request.url.path` is not safe
+    to log verbatim the way it is for every other route. A single shared function (not
+    inline checks scattered across middleware.py and errors.py, the two places that log a
+    request path) so every call site agrees on the same rule."""
+    if path.startswith("/sub/"):
+        return "/sub/***"
+    return path
 
 
 def _add_request_id(_logger: Any, _method_name: str, event_dict: Any) -> Any:

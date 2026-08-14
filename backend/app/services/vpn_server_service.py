@@ -1,5 +1,5 @@
 from app.core.errors import ConflictError, NotFoundError
-from app.models.enums import VPNServerStatus
+from app.models.enums import VPNProtocol, VPNServerStatus
 from app.models.vpn_server import VPNServer
 from app.repositories.vpn_server_repository import VPNServerRepository
 from app.schemas.vpn import VPNServerCreate, VPNServerUpdate
@@ -10,7 +10,12 @@ class VPNServerService:
         self._servers = server_repository
 
     async def list(self) -> list[VPNServer]:
-        return await self._servers.list(limit=1000)
+        # WireGuard-only: this listing (and the bot's "Серверы" picker built on it — see
+        # bot/app/handlers/servers.py) predates VLESS and has no UI for a caller to
+        # express which protocol's server it wants, so it stays scoped to the protocol
+        # it always implicitly meant. VLESS servers have their own listing —
+        # VLESSServerService.list() / GET /api/v1/vless-servers.
+        return await self._servers.list(limit=1000, protocol=VPNProtocol.WIREGUARD)
 
     async def get(self, server_id: int) -> VPNServer:
         server = await self._servers.get(server_id)
@@ -31,8 +36,8 @@ class VPNServerService:
         await self._servers.flush()
         return server
 
-    async def pick_best_available(self) -> VPNServer:
-        candidates = await self._servers.list_available()
+    async def pick_best_available(self, protocol: VPNProtocol = VPNProtocol.WIREGUARD) -> VPNServer:
+        candidates = await self._servers.list_available(protocol)
         under_capacity = [s for s in candidates if s.current_load < s.capacity]
         if not under_capacity:
             raise ConflictError(

@@ -33,6 +33,26 @@ class VPNPeerStatus(StrEnum):
     REVOKED = "revoked"
 
 
+class SubscriptionLinkStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class VPNProtocol(StrEnum):
+    """Which exit-node transport a VPNServer/Device uses. WireGuard remains the default
+    for every existing row (see the VLESS migration's server_default) — VLESS is
+    additive, not a replacement (see docs/vless.md)."""
+
+    WIREGUARD = "wireguard"
+    VLESS = "vless"
+
+
+class VLESSCredentialStatus(StrEnum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    REVOKED = "revoked"
+
+
 class RoutingMode(StrEnum):
     FULL_VPN = "full_vpn"
     SMART_VPN = "smart_vpn"

@@ -1,0 +1,136 @@
+---
+- name: Install nftables and archive tools
+  ansible.builtin.apt:
+    name:
+      - nftables
+      - unzip
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the xray system user (no login, no home)
+  ansible.builtin.user:
+    name: xray
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Ensure /etc/xray exists with restrictive permissions
+  ansible.builtin.file:
+    path: /etc/xray
+    state: directory
+    owner: xray
+    group: xray
+    mode: "0750"
+
+- name: Download Xray-core {{ xray_core_version }}
+  ansible.builtin.unarchive:
+    src: "https://github.com/XTLS/Xray-core/releases/download/v{{ xray_core_version }}/Xray-linux-64.zip"
+    dest: /tmp
+    remote_src: true
+    creates: /tmp/xray
+  register: xray_download
+
+- name: Install the xray binary
+  ansible.builtin.copy:
+    src: /tmp/xray
+    dest: /usr/local/bin/xray
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  notify: Restart xray
+
+- name: Generate the node's Reality X25519 key pair (idempotent — only runs once)
+  # `xray x25519` prints two lines: "Private key: <b64url>" and "Public key: <b64url>"
+  # (verified against XTLS/Xray-core@main — see docs/xray-agent.md). Only the private
+  # key ever touches disk on this host; the public key is registered in the backend's
+  # admin panel (VLESSServerConfig.reality_public_key), never persisted here beyond
+  # this one debug print.
+  ansible.builtin.shell: |
+    set -euo pipefail
+    /usr/local/bin/xray x25519 > /tmp/xray_x25519_output
+    grep '^Private key:' /tmp/xray_x25519_output | awk '{print $NF}' > /etc/xray/reality_private_key
+    chmod 600 /etc/xray/reality_private_key
+    chown xray:xray /etc/xray/reality_private_key
+  args:
+    creates: /etc/xray/reality_private_key
+    executable: /bin/bash
+  no_log: true
+
+- name: Read the generated key pair back for the public-key debug message
+  ansible.builtin.shell: |
+    set -euo pipefail
+    /usr/local/bin/xray x25519 -i "$(cat /etc/xray/reality_private_key)"
+  args:
+    executable: /bin/bash
+  register: xray_x25519_readback
+  changed_when: false
+  no_log: true
+
+- name: Show the node's Reality public key (register this in the admin panel's VLESS server form)
+  ansible.builtin.debug:
+    msg: >-
+      Reality public key for {{ inventory_hostname }}:
+      {{ xray_x25519_readback.stdout_lines | select('search', '^Public key:') | first
+         | regex_replace('^Public key:\s*', '') }}
+      — register this VLESS server via the admin panel with this reality_public_key,
+      port={{ xray_listen_port }}, sni={{ xray_reality_camouflage_sni }},
+      short_ids={{ xray_reality_short_ids }}, and
+      xray_agent_base_url=http://{{ inventory_hostname }}:{{ xray_agent_port }}
+      before routing any users to it.
+
+- name: Read the Reality private key for the config.json template
+  ansible.builtin.slurp:
+    src: /etc/xray/reality_private_key
+  register: xray_reality_private_key_raw
+  no_log: true
+
+# Plain JSON has no comment syntax, so the "why" for this file's shape lives here
+# instead of in the template itself: it is deliberately static and never rewritten for
+# per-user changes — the "vless-reality-in" inbound starts with an empty client list
+# and every user add/remove/rotate happens exclusively through the HandlerService gRPC
+# API (127.0.0.1:{{ xray_api_port }}), called only by xray-agent on this same host (see
+# docs/xray-agent.md). This file is only re-templated (and Xray restarted) for genuine
+# infrastructure changes: camouflage SNI, listen port, short-ID pool.
+- name: Render /etc/xray/config.json
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: /etc/xray/config.json
+    owner: xray
+    group: xray
+    mode: "0640"
+  vars:
+    xray_reality_private_key: "{{ xray_reality_private_key_raw.content | b64decode | trim }}"
+  notify: Restart xray
+  no_log: true
+
+- name: Render the nftables ruleset (VLESS port + xray-agent allowlist, no NAT/forward)
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    mode: "0644"
+  notify: Restart nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Install the xray systemd unit
+  ansible.builtin.template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart xray
+
+- name: Enable and start xray
+  ansible.builtin.systemd:
+    name: xray
+    enabled: true
+    state: started
+    daemon_reload: true

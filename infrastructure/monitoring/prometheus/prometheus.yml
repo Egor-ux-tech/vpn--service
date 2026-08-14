@@ -28,8 +28,17 @@ scrape_configs:
         labels:
           service: vpn-agent
 
-  # Host-level CPU/RAM/network/disk for each VPN exit server — deployed by the same
-  # Ansible role that installs the vpn-agent (infrastructure/ansible/roles/wireguard).
+  # xray-agent instances run on VLESS exit nodes, one per node, provisioned by the
+  # Ansible xray-agent role — same pattern as vpn-agent above. See docs/vless.md.
+  - job_name: xray-agent
+    metrics_path: /metrics
+    static_configs:
+      - targets: []
+        labels:
+          service: xray-agent
+
+  # Host-level CPU/RAM/network/disk for each VPN exit server (WireGuard or VLESS) —
+  # deployed by the same Ansible roles that install vpn-agent/xray-agent.
   - job_name: node
     static_configs:
       - targets: []

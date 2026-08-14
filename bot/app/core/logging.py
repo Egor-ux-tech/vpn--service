@@ -4,7 +4,16 @@ from typing import Any
 
 import structlog
 
-_REDACT_KEYS = {"private_key", "privatekey", "config_text", "token", "authorization", "secret"}
+_REDACT_KEYS = {
+    "private_key",
+    "privatekey",
+    "config_text",
+    "token",
+    "authorization",
+    "secret",
+    "subscription_token",
+    "subscription_url",
+}
 
 
 def _redact_sensitive(_logger: Any, _method_name: str, event_dict: Any) -> Any:

@@ -28,9 +28,12 @@ from app.repositories.routing_repository import (
     UserCustomDomainRepository,
     UserRoutingProfileRepository,
 )
+from app.repositories.subscription_link_repository import SubscriptionLinkRepository
 from app.repositories.subscription_repository import SubscriptionRepository
 from app.repositories.support_repository import SupportMessageRepository, SupportTicketRepository
 from app.repositories.user_repository import UserRepository
+from app.repositories.vless_credential_repository import VLESSCredentialRepository
+from app.repositories.vless_server_config_repository import VLESSServerConfigRepository
 from app.repositories.vpn_peer_repository import VPNPeerRepository
 from app.repositories.vpn_profile_repository import VPNProfileRepository
 from app.repositories.vpn_server_repository import VPNServerRepository
@@ -47,9 +50,17 @@ from app.services.referral_service import ReferralService
 from app.services.routing.dns_resolver import DomainResolver
 from app.services.routing.engine import RoutingEngine
 from app.services.routing_service import RoutingService
+from app.services.subscription_delivery.delivery_service import SubscriptionDeliveryService
+from app.services.subscription_delivery.formatters.base import SubscriptionFormatter
+from app.services.subscription_delivery.formatters.vless_formatter import VLESSFormatter
+from app.services.subscription_delivery.formatters.wireguard_formatter import WireGuardFormatter
+from app.services.subscription_link_service import SubscriptionLinkService
 from app.services.subscription_service import SubscriptionService
 from app.services.support_service import SupportService
 from app.services.user_service import UserService
+from app.services.vless.provider import XrayAgentProvider
+from app.services.vless.xray_agent_provider import HttpXrayAgentProvider
+from app.services.vless_server_service import VLESSServerService
 from app.services.vpn.provider import VPNProvider
 from app.services.vpn.wireguard_provider import WireGuardProvider
 from app.services.vpn_server_service import VPNServerService
@@ -141,6 +152,18 @@ def get_referral_repository(db: DbSession) -> ReferralRepository:
     return ReferralRepository(db)
 
 
+def get_subscription_link_repository(db: DbSession) -> SubscriptionLinkRepository:
+    return SubscriptionLinkRepository(db)
+
+
+def get_vless_credential_repository(db: DbSession) -> VLESSCredentialRepository:
+    return VLESSCredentialRepository(db)
+
+
+def get_vless_server_config_repository(db: DbSession) -> VLESSServerConfigRepository:
+    return VLESSServerConfigRepository(db)
+
+
 # ---- Cross-cutting providers ----
 
 
@@ -148,6 +171,10 @@ def get_vpn_provider(settings: SettingsDep) -> VPNProvider:
     return WireGuardProvider(
         shared_secret=settings.vpn_agent_shared_secret, dns_servers=settings.vpn_dns_list
     )
+
+
+def get_xray_agent_provider(settings: SettingsDep) -> XrayAgentProvider:
+    return HttpXrayAgentProvider(shared_secret=settings.xray_agent_shared_secret)
 
 
 def get_payment_provider(settings: SettingsDep) -> PaymentProvider:
@@ -197,6 +224,15 @@ def get_vpn_server_service(
     return VPNServerService(repo)
 
 
+def get_vless_server_service(
+    server_repo: Annotated[VPNServerRepository, Depends(get_vpn_server_repository)],
+    config_repo: Annotated[
+        VLESSServerConfigRepository, Depends(get_vless_server_config_repository)
+    ],
+) -> VLESSServerService:
+    return VLESSServerService(server_repo, config_repo)
+
+
 def get_routing_service(
     category_repo: Annotated[RoutingCategoryRepository, Depends(get_routing_category_repository)],
     rule_repo: Annotated[RoutingRuleRepository, Depends(get_routing_rule_repository)],
@@ -223,16 +259,43 @@ def get_routing_service(
     )
 
 
+def get_subscription_link_service(
+    repo: Annotated[SubscriptionLinkRepository, Depends(get_subscription_link_repository)],
+) -> SubscriptionLinkService:
+    return SubscriptionLinkService(repo)
+
+
 def get_device_service(
+    settings: SettingsDep,
     device_repo: Annotated[DeviceRepository, Depends(get_device_repository)],
     peer_repo: Annotated[VPNPeerRepository, Depends(get_vpn_peer_repository)],
     subscription_repo: Annotated[SubscriptionRepository, Depends(get_subscription_repository)],
     server_service: Annotated[VPNServerService, Depends(get_vpn_server_service)],
     routing_service: Annotated[RoutingService, Depends(get_routing_service)],
     provider: Annotated[VPNProvider, Depends(get_vpn_provider)],
+    subscription_link_service: Annotated[
+        SubscriptionLinkService, Depends(get_subscription_link_service)
+    ],
+    vless_credential_repo: Annotated[
+        VLESSCredentialRepository, Depends(get_vless_credential_repository)
+    ],
+    vless_server_config_repo: Annotated[
+        VLESSServerConfigRepository, Depends(get_vless_server_config_repository)
+    ],
+    xray_agent_provider: Annotated[XrayAgentProvider, Depends(get_xray_agent_provider)],
 ) -> DeviceService:
     return DeviceService(
-        device_repo, peer_repo, subscription_repo, server_service, routing_service, provider
+        device_repo,
+        peer_repo,
+        subscription_repo,
+        server_service,
+        routing_service,
+        provider,
+        subscription_link_service,
+        settings.subscription_base_url,
+        vless_credential_repo,
+        vless_server_config_repo,
+        xray_agent_provider,
     )
 
 
@@ -279,6 +342,51 @@ def get_referral_service(
     repo: Annotated[ReferralRepository, Depends(get_referral_repository)],
 ) -> ReferralService:
     return ReferralService(repo)
+
+
+def get_subscription_formatters() -> dict[str, SubscriptionFormatter]:
+    """The entire extension point for future clients (Happ, v2rayNG, ...) — a new format
+    is a new entry here, nothing else in the WireGuard delivery path changes. VLESS is
+    dispatched separately (see SubscriptionDeliveryService.deliver — a VLESS device
+    always renders via VLESSFormatter regardless of this registry, since ?format=
+    swapping doesn't make sense across protocols); this registry stays WireGuard-format-
+    family only, exactly as before."""
+    formatter = WireGuardFormatter()
+    return {formatter.format_id: formatter}
+
+
+def get_vless_formatter() -> VLESSFormatter:
+    return VLESSFormatter()
+
+
+def get_subscription_delivery_service(
+    link_service: Annotated[SubscriptionLinkService, Depends(get_subscription_link_service)],
+    device_repo: Annotated[DeviceRepository, Depends(get_device_repository)],
+    subscription_repo: Annotated[SubscriptionRepository, Depends(get_subscription_repository)],
+    peer_repo: Annotated[VPNPeerRepository, Depends(get_vpn_peer_repository)],
+    server_repo: Annotated[VPNServerRepository, Depends(get_vpn_server_repository)],
+    profile_repo: Annotated[VPNProfileRepository, Depends(get_vpn_profile_repository)],
+    formatters: Annotated[dict[str, SubscriptionFormatter], Depends(get_subscription_formatters)],
+    vless_credential_repo: Annotated[
+        VLESSCredentialRepository, Depends(get_vless_credential_repository)
+    ],
+    vless_server_config_repo: Annotated[
+        VLESSServerConfigRepository, Depends(get_vless_server_config_repository)
+    ],
+    vless_formatter: Annotated[VLESSFormatter, Depends(get_vless_formatter)],
+) -> SubscriptionDeliveryService:
+    return SubscriptionDeliveryService(
+        link_service,
+        device_repo,
+        subscription_repo,
+        peer_repo,
+        server_repo,
+        profile_repo,
+        formatters,
+        vless_credential_repo,
+        vless_server_config_repo,
+        vless_formatter,
+    )
 
 
 # ---- Auth guards ----

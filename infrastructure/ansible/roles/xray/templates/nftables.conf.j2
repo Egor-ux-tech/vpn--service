@@ -1,0 +1,44 @@
+## Managed by Ansible (roles/xray) — do not edit by hand.
+#!/usr/sbin/nft -f
+##
+## Unlike roles/wireguard's ruleset, there is no `nat`/`forward` table here: VLESS is an
+## application-layer proxy (Xray terminates each connection and re-originates its own
+## outbound connection via the "freedom" outbound — see config.json.j2), not a
+## network-layer tunnel, so there is no client packet to forward or masquerade. The
+## Xray gRPC API (127.0.0.1:{{ xray_api_port }}) is bound to loopback only and never
+## listens on a public interface at all — the DROP-by-default input policy below is
+## belt-and-suspenders on top of that, not the only thing keeping it private.
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        icmp type echo-request accept
+        icmpv6 type echo-request accept
+
+        tcp dport 22 accept
+
+        # VLESS Reality — the only port this node serves real client traffic on.
+        tcp dport {{ xray_listen_port }} accept
+
+        # xray-agent management API — only the control plane may reach it, never public.
+        ip saddr {{ backend_source_ip }} tcp dport {{ xray_agent_port }} accept
+
+        # node_exporter — only Prometheus may scrape it.
+        ip saddr {{ prometheus_source_ip }} tcp dport 9100 accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}

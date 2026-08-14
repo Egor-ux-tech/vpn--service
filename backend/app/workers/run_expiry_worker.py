@@ -18,7 +18,10 @@ from app.repositories.routing_repository import (
     UserCustomDomainRepository,
     UserRoutingProfileRepository,
 )
+from app.repositories.subscription_link_repository import SubscriptionLinkRepository
 from app.repositories.subscription_repository import SubscriptionRepository
+from app.repositories.vless_credential_repository import VLESSCredentialRepository
+from app.repositories.vless_server_config_repository import VLESSServerConfigRepository
 from app.repositories.vpn_peer_repository import VPNPeerRepository
 from app.repositories.vpn_profile_repository import VPNProfileRepository
 from app.repositories.vpn_server_repository import VPNServerRepository
@@ -28,7 +31,9 @@ from app.services.notifications.bot_notifier import BotNotifier
 from app.services.routing.dns_resolver import DomainResolver
 from app.services.routing.engine import RoutingEngine
 from app.services.routing_service import RoutingService
+from app.services.subscription_link_service import SubscriptionLinkService
 from app.services.subscription_service import SubscriptionService
+from app.services.vless.xray_agent_provider import HttpXrayAgentProvider
 from app.services.vpn.wireguard_provider import WireGuardProvider
 from app.services.vpn_server_service import VPNServerService
 from app.workers.subscription_expiry import SubscriptionExpiryWorker
@@ -59,6 +64,11 @@ async def run() -> int:
             WireGuardProvider(
                 shared_secret=settings.vpn_agent_shared_secret, dns_servers=settings.vpn_dns_list
             ),
+            SubscriptionLinkService(SubscriptionLinkRepository(session)),
+            settings.subscription_base_url,
+            VLESSCredentialRepository(session),
+            VLESSServerConfigRepository(session),
+            HttpXrayAgentProvider(shared_secret=settings.xray_agent_shared_secret),
         )
         worker = SubscriptionExpiryWorker(
             subscription_service=SubscriptionService(SubscriptionRepository(session)),

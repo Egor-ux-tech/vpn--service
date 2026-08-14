@@ -48,7 +48,7 @@ async def test_device_name_handler_creates_device_when_flag_set():
 
     await device_name_message_handler(update, context)
 
-    backend.create_device.assert_awaited_once_with(42, "iPhone", None)
+    backend.create_device.assert_awaited_once_with(42, "iPhone", None, "wireguard")
     assert context.user_data[_AWAITING_DEVICE_NAME] is False
 
 

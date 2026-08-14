@@ -27,12 +27,19 @@ x-python-env: &python-env
   VPN_DEFAULT_NETWORK: ${VPN_DEFAULT_NETWORK:-10.66.0.0/16}
   VPN_DNS: ${VPN_DNS:-1.1.1.1,1.0.0.1}
   VPN_AGENT_SHARED_SECRET: ${VPN_AGENT_SHARED_SECRET:-change-me-vpn-agent-secret}
+  XRAY_AGENT_SHARED_SECRET: ${XRAY_AGENT_SHARED_SECRET:-change-me-xray-agent-secret}
   PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
   PAYMENT_PROVIDER_KEY: ${PAYMENT_PROVIDER_KEY:-}
   PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-change-me}
   # Must be the real https://<ADMIN_DOMAIN> origin in production — the wildcard-ish
   # localhost default only works for local dev.
   BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["http://localhost:3000"]}
+  # Required, not defaulted: handed directly to third-party VPN client apps (WireGuard,
+  # Happ, ...) outside the Docker network, so the localhost default would silently produce
+  # dead links for every real user. Must be the real https://<API_DOMAIN> origin — same one
+  # Caddy terminates TLS for (see infrastructure/caddy/Caddyfile).
+  SUBSCRIPTION_BASE_URL: ${SUBSCRIPTION_BASE_URL:?set to https://<API_DOMAIN>}
+  SUBSCRIPTION_LINK_RATE_LIMIT: ${SUBSCRIPTION_LINK_RATE_LIMIT:-30/minute}
 
 services:
   postgres:

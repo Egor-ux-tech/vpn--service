@@ -1,0 +1,27 @@
+## Managed by Ansible (roles/xray-agent) — do not edit by hand.
+[Unit]
+Description=Xray Agent — VLESS Reality user lifecycle service
+After=network-online.target xray.service
+Wants=network-online.target
+Requires=xray.service
+
+[Service]
+Type=simple
+User=xray-agent
+Group=xray-agent
+EnvironmentFile=/etc/xray-agent/xray-agent.env
+ExecStart=/opt/vpn-service/xray-agent/.venv/bin/uvicorn app.main:app --app-dir /opt/vpn-service/xray-agent --host ${AGENT_HOST} --port ${AGENT_PORT}
+Restart=on-failure
+RestartSec=3
+
+# The service runs as an unprivileged user with no special capabilities at all — unlike
+# vpn-agent (CAP_NET_ADMIN) and xray itself (CAP_NET_BIND_SERVICE), xray-agent never
+# binds a privileged port or touches network interfaces; it only makes outbound calls
+# to Xray's loopback-only gRPC API and serves its own unprivileged HTTP port.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/xray-agent
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

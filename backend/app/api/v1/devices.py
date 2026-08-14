@@ -26,12 +26,17 @@ async def create_device(
     service: Annotated[DeviceService, Depends(get_device_service)],
 ) -> DeviceProvisioningResult:
     result = await service.provision(
-        user=user, name=payload.name, requested_server_id=payload.server_id
+        user=user,
+        name=payload.name,
+        requested_server_id=payload.server_id,
+        protocol=payload.protocol,
     )
     return DeviceProvisioningResult(
         device=DeviceRead.model_validate(result.device),
         config_text=result.config_text,
         qr_code_base64=result.qr_code_base64,
+        subscription_url=result.subscription_url,
+        subscription_qr_code_base64=result.subscription_qr_code_base64,
     )
 
 

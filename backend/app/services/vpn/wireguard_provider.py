@@ -22,6 +22,9 @@ from app.models.device import Device
 from app.models.enums import VPNPeerStatus
 from app.models.vpn_peer import VPNPeer
 from app.models.vpn_server import VPNServer
+from app.services.subscription_delivery.formatters.wireguard_formatter import (
+    render_wireguard_config,
+)
 from app.services.vpn.provider import PeerProvisioningResult, PeerStatus
 
 logger = get_logger(__name__)
@@ -136,18 +139,17 @@ class WireGuardProvider:
         allowed_ips: list[str],
         dns: list[str],
     ) -> str:
-        allowed = ", ".join(allowed_ips) if allowed_ips else "0.0.0.0/0, ::/0"
-        dns_line = ", ".join(dns) if dns else ", ".join(self._dns)
-        return (
-            "[Interface]\n"
-            f"PrivateKey = {private_key}\n"
-            f"Address = {assigned_ip}\n"
-            f"DNS = {dns_line}\n\n"
-            "[Peer]\n"
-            f"PublicKey = {server_public_key}\n"
-            f"Endpoint = {server_endpoint}\n"
-            f"AllowedIPs = {allowed}\n"
-            "PersistentKeepalive = 25\n"
+        # Rendering itself moved to render_wireguard_config (shared with the subscription
+        # -delivery formatter, see app/services/subscription_delivery/formatters/
+        # wireguard_formatter.py) — this method's own external behavior is unchanged,
+        # including the empty-dns-falls-back-to-the-configured-default resolved here.
+        return render_wireguard_config(
+            private_key=private_key,
+            assigned_ip=assigned_ip,
+            server_public_key=server_public_key,
+            server_endpoint=server_endpoint,
+            allowed_ips=allowed_ips,
+            dns=dns or self._dns,
         )
 
 

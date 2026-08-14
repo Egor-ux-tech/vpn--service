@@ -18,3 +18,28 @@ vpn_service_repo_url: "https://github.com/your-org/vpn-service.git"
 vpn_service_git_ref: "main"
 
 node_exporter_version: "1.8.2"
+
+# --- VLESS Reality (roles/xray, roles/xray-agent) — see docs/vless.md ---
+
+# Pin an exact XTLS/Xray-core release tag (github.com/XTLS/Xray-core/releases) —
+# never track "latest", same discipline as node_exporter_version above.
+xray_core_version: "25.8.29"
+
+xray_agent_shared_secret: "change-me-xray-agent-secret"   # must match backend's XRAY_AGENT_SHARED_SECRET — deliberately NOT vpn_agent_shared_secret
+xray_agent_port: 8801
+xray_listen_port: 443            # public VLESS Reality port
+xray_api_port: 10085             # Xray's HandlerService gRPC API — loopback-only, never in nftables' allowlist
+xray_inbound_tag: "vless-reality-in"
+xray_reconciliation_interval_seconds: 300
+
+# PLACEHOLDER — do not use in production. The camouflage/"target" domain Reality
+# impersonates: must be a real, popular, TLS 1.3-serving, non-CDN-fronted site whose
+# certificate and TLS behavior a censor would not want to block. Choosing this well is
+# an operational/threat-model decision, not a technical default — see docs/vless.md's
+# "Reality camouflage domain" section before deploying for real.
+xray_reality_camouflage_sni: "www.example.com"
+
+# A single empty entry makes the client-side `sid` parameter optional/omittable for
+# every client — see docs/vless.md. Do not add real short IDs unless you specifically
+# need per-client/per-campaign Reality short-ID segregation (not required at MVP).
+xray_reality_short_ids: [""]

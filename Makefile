@@ -13,9 +13,9 @@ help:
 	@echo "make logs             - tail logs for all services"
 	@echo "make migrate          - apply alembic migrations"
 	@echo "make makemigrations m='msg' - generate a new alembic revision"
-	@echo "make lint             - ruff check backend/ bot/ vpn/"
-	@echo "make fmt              - ruff format backend/ bot/ vpn/"
-	@echo "make typecheck        - mypy backend/ bot/ vpn/"
+	@echo "make lint             - ruff check backend/ bot/ vpn/ xray-agent/"
+	@echo "make fmt              - ruff format backend/ bot/ vpn/ xray-agent/"
+	@echo "make typecheck        - mypy backend/ bot/ vpn/ xray-agent/"
 	@echo "make test             - run all python test suites"
 	@echo "make e2e-smoke        - cross-service E2E test: real backend + vpn-agent processes (see tests/README.md)"
 	@echo "make backend-dev      - run backend locally with uvicorn --reload"
@@ -55,18 +55,21 @@ lint:
 	cd backend && ruff check .
 	cd bot && ruff check .
 	cd vpn && ruff check .
+	cd xray-agent && ruff check .
 
 fmt:
 	cd backend && ruff format .
 	cd bot && ruff format .
 	cd vpn && ruff format .
+	cd xray-agent && ruff format .
 
 typecheck:
 	cd backend && mypy app
 	cd bot && mypy app
 	cd vpn && mypy app
+	cd xray-agent && mypy app
 
-test: test-backend test-bot test-vpn
+test: test-backend test-bot test-vpn test-xray-agent
 
 test-backend:
 	cd backend && python -m pytest -q
@@ -76,6 +79,9 @@ test-bot:
 
 test-vpn:
 	cd vpn && python -m pytest -q
+
+test-xray-agent:
+	cd xray-agent && python -m pytest -q
 
 e2e-smoke:
 	cd backend && python -m pytest ../tests -v
