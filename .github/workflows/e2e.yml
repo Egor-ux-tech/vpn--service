@@ -1,0 +1,41 @@
+name: e2e
+
+# Cross-service smoke test (see tests/README.md): spawns real backend + vpn-agent
+# processes and drives the full "connect to VPN" journey through the bot's own
+# BackendClient. Runs whenever either service changes, since it's the only test that
+# catches contract mismatches *between* them.
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", "vpn/**", "bot/**", "tests/**", ".github/workflows/e2e.yml"]
+  pull_request:
+    paths: ["backend/**", "vpn/**", "bot/**", "tests/**", ".github/workflows/e2e.yml"]
+
+jobs:
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # tests/conftest.py looks for <service>/.venv/bin/python specifically — it spawns
+      # each service as its own subprocess with its own interpreter, mirroring how they
+      # actually run in production as separate deployables.
+      - name: Set up backend venv
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Set up vpn-agent venv
+        working-directory: vpn
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Run cross-service E2E test
+        working-directory: backend
+        run: .venv/bin/python -m pytest ../tests -v

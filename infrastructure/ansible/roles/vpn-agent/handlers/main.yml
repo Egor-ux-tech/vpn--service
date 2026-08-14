@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart vpn-agent
+  ansible.builtin.systemd:
+    name: vpn-agent
+    state: restarted

@@ -1,0 +1,8 @@
+## Managed by Ansible (roles/wireguard) — do not edit by hand, changes will be overwritten.
+## Peers are added/removed at runtime by the vpn-agent (`wg set`), never written here —
+## this file only defines the interface itself.
+[Interface]
+PrivateKey = {{ wg_private_key_raw.content | b64decode | trim }}
+Address = {{ wg_gateway_ip }}
+ListenPort = {{ wg_listen_port }}
+SaveConfig = true

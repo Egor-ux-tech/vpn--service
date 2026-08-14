@@ -1,0 +1,20 @@
+# Copy to all.yml (gitignored) and fill in. Better yet, encrypt with `ansible-vault encrypt
+# group_vars/all.yml` and never commit the plaintext at all — these are the same secrets
+# that live in the control-plane's .env, so treat them with the same care.
+
+vpn_agent_shared_secret: "change-me-vpn-agent-secret"   # must match backend's VPN_AGENT_SHARED_SECRET
+vpn_agent_port: 8800
+wg_listen_port: 51820
+vpn_dns: "1.1.1.1,1.0.0.1"
+
+# The control-plane's outbound IP (or CIDR) — the vpn-agent's management port (8800) is
+# firewalled to only accept connections from here, never exposed publicly.
+backend_source_ip: "203.0.113.1/32"
+
+# Prometheus server's IP, allowed to scrape :9100 (node_exporter) and :8800/metrics.
+prometheus_source_ip: "203.0.113.1/32"
+
+vpn_service_repo_url: "https://github.com/your-org/vpn-service.git"
+vpn_service_git_ref: "main"
+
+node_exporter_version: "1.8.2"

@@ -1,0 +1,93 @@
+---
+- name: Install WireGuard and firewall packages
+  ansible.builtin.apt:
+    name:
+      - wireguard
+      - wireguard-tools
+      - nftables
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# IPv6 forwarding is deliberately left OFF — see docs/wireguard.md's "IPv6 strategy"
+# section. This service is IPv4-only end to end: peers get IPv4 addresses only
+# (ip_allocator.py), the client's own WireGuard interface has no IPv6 address, and the
+# NAT table below only masquerades IPv4 (`table ip nat`, not `table ip6 nat`). Client
+# configs still route ::/0 into the tunnel (see WireGuardProvider.build_client_config) so
+# a dual-stack client's IPv6 traffic doesn't silently escape the tunnel via the OS's normal
+# path — but with forwarding off here, any such packet that reached this host would be
+# dropped, not routed onward. Enabling this without also adding real IPv6 addressing and
+# an `ip6 nat` masquerade rule would not "support IPv6" — it would just forward
+# unmasqueraded packets with a private source address that upstream routers will drop
+# anyway, for no benefit.
+- name: Enable IPv4 forwarding persistently (IPv6 forwarding stays disabled — see comment)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-wireguard.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 0
+    mode: "0644"
+  notify: Reload sysctl
+
+- name: Ensure /etc/wireguard exists with restrictive permissions
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    mode: "0700"
+
+- name: Generate the server's WireGuard private key (idempotent — only runs once)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    wg genkey | tee /etc/wireguard/privatekey | wg pubkey > /etc/wireguard/publickey
+    chmod 600 /etc/wireguard/privatekey
+    chmod 644 /etc/wireguard/publickey
+  args:
+    creates: /etc/wireguard/privatekey
+    executable: /bin/bash
+
+- name: Read the server's public key back
+  ansible.builtin.slurp:
+    src: /etc/wireguard/publickey
+  register: wg_public_key_raw
+
+- name: Show the server's public key (register this in the admin panel's server form)
+  ansible.builtin.debug:
+    msg: >-
+      Server public key for {{ inventory_hostname }}: {{ wg_public_key_raw.content | b64decode | trim }}
+      — register this VPN server via the admin panel / POST /api/v1/servers with this
+      public_key, endpoint={{ wg_public_ip }}:{{ wg_listen_port }}, and
+      internal_network={{ internal_network }} before routing any users to it.
+
+- name: Read the server's private key for the wg0.conf template
+  ansible.builtin.slurp:
+    src: /etc/wireguard/privatekey
+  register: wg_private_key_raw
+  no_log: true
+
+- name: Render /etc/wireguard/wg0.conf
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    mode: "0600"
+  notify: Restart wireguard
+  no_log: true
+
+- name: Render the nftables ruleset (NAT + forwarding + management-port allowlist)
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    mode: "0644"
+  notify: Restart nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Enable and start wg-quick@wg0
+  ansible.builtin.systemd:
+    name: wg-quick@wg0
+    enabled: true
+    state: started

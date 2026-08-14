@@ -1,0 +1,15 @@
+---
+# Provisions a VPN exit server end to end: WireGuard interface + firewall/NAT, the
+# vpn-agent control service, and node_exporter for host metrics. Run against a fresh
+# Ubuntu 22.04+ host: `ansible-playbook -i inventory/hosts.ini site.yml`.
+#
+# This playbook does NOT register the server with the backend — after it completes, take
+# the printed public key and register the server via the admin panel or
+# `POST /api/v1/servers` (see docs/deployment.md).
+- name: Provision a VPN exit server
+  hosts: vpn_servers
+  become: true
+  roles:
+    - wireguard
+    - vpn-agent
+    - node-exporter

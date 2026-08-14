@@ -1,0 +1,24 @@
+# Production reverse proxy / automatic HTTPS termination for the control plane.
+#
+# No real domains or secrets are baked in here — API_DOMAIN, ADMIN_DOMAIN, and ACME_EMAIL
+# are substituted from the environment at container start (see docker-compose.prod.yml and
+# .env.example). Caddy obtains and renews Let's Encrypt certificates automatically for
+# whatever domain is configured, the first time it's reached over HTTPS for that domain —
+# see docs/deployment.md for the DNS records and open ports this requires.
+#
+# This is the ONLY service in the production stack that publishes ports to the host
+# (80/443, see docker-compose.prod.yml) — the backend and admin panel are reachable
+# exclusively through this proxy, never directly from the public internet.
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	# Payment webhooks and the Telegram bot's internal calls both go through this same
+	# host/port — nothing about this route is admin-panel-specific.
+	reverse_proxy backend:8000
+}
+
+{$ADMIN_DOMAIN} {
+	reverse_proxy frontend:3000
+}

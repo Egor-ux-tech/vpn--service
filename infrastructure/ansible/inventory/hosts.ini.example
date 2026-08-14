@@ -1,0 +1,12 @@
+# Copy to hosts.ini (gitignored) and fill in real hosts.
+# One entry per VPN exit server. `internal_network` must match what you register for this
+# server via POST /api/v1/servers (admin panel/API) — the two are independent sources of
+# truth kept in sync by whoever provisions the server, not auto-discovered.
+
+[vpn_servers]
+nl1.example.com ansible_host=203.0.113.10 wg_public_ip=203.0.113.10 internal_network=10.66.1.0/24 wg_gateway_ip=10.66.1.1/24
+de1.example.com ansible_host=203.0.113.20 wg_public_ip=203.0.113.20 internal_network=10.66.2.0/24 wg_gateway_ip=10.66.2.1/24
+
+[vpn_servers:vars]
+ansible_user=deploy
+ansible_python_interpreter=/usr/bin/python3

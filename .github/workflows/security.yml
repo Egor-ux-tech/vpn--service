@@ -1,0 +1,22 @@
+name: security
+
+# Repo-wide checks that don't belong to any single service: secret scanning across the
+# whole history of each push/PR. Per-service dependency vulnerability scans (pip-audit,
+# npm audit) live in each service's own workflow instead, since they only need to re-run
+# when that service's dependencies actually change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

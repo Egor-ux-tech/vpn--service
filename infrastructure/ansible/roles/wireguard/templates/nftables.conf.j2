@@ -1,0 +1,61 @@
+## Managed by Ansible (roles/wireguard) — do not edit by hand.
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        icmp type echo-request accept
+        icmpv6 type echo-request accept
+
+        tcp dport 22 accept
+        udp dport {{ wg_listen_port }} accept
+
+        # vpn-agent management API — only the control plane may reach it, never public.
+        ip saddr {{ backend_source_ip }} tcp dport {{ vpn_agent_port }} accept
+
+        # node_exporter — only Prometheus may scrape it.
+        ip saddr {{ prometheus_source_ip }} tcp dport 9100 accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+
+        ct state established,related accept
+
+        # IPv6 is deliberately never forwarded — see docs/wireguard.md's "IPv6 strategy".
+        # This service is IPv4-only end to end (peers only ever get IPv4 addresses, and
+        # the nat table below has no ip6 equivalent), so there is nothing a forwarded
+        # IPv6 packet could correctly be NATed to. This rule is explicit defense in depth
+        # on top of net.ipv6.conf.all.forwarding=0 and WireGuard's own cryptokey routing
+        # (peers are configured with IPv4-only AllowedIPs, so the kernel drops non-matching
+        # source addresses before a packet would even reach this chain) — not the only
+        # thing standing between a client and an IPv6 leak.
+        meta nfproto ipv6 iifname "wg0" drop
+        meta nfproto ipv6 oifname "wg0" drop
+
+        iifname "wg0" accept
+        oifname "wg0" accept
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+
+## IPv4-only deliberately (`table ip`, not `table ip6`) — see the forward chain's comment
+## above and docs/wireguard.md's "IPv6 strategy". Adding IPv6 support later needs an
+## equivalent `table ip6 nat` here *and* removing the forward-chain drop rules *and* real
+## IPv6 addressing on peers — not just one of these.
+table ip nat {
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        ip saddr {{ internal_network }} oifname "{{ ansible_default_ipv4.interface }}" masquerade
+    }
+}

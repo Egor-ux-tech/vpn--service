@@ -1,0 +1,138 @@
+# Production control-plane stack: Caddy (automatic HTTPS) in front of the backend and
+# admin panel, with neither exposed directly to the public internet.
+#
+# This is a standalone file, not an overlay on docker-compose.yml — Compose merges list
+# fields like `ports` by concatenation, not replacement, so an override file cannot
+# *remove* the host port bindings docker-compose.yml uses for local development. Keeping
+# this file self-contained means what's written here is exactly what runs in production,
+# with no merge behavior to reason about.
+#
+# Usage: see docs/deployment.md for the full checklist (DNS records, required .env values,
+# etc). Summary:
+#   cp .env.example .env   # then replace every change-me* value, and set API_DOMAIN,
+#                           # ADMIN_DOMAIN, ACME_EMAIL to real values
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+name: vpn-service-prod
+
+x-python-env: &python-env
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://vpnservice:change-me@postgres:5432/vpnservice}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  ADMIN_SECRET: ${ADMIN_SECRET:-change-me-admin-bootstrap-secret}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-change-me-shared-secret-for-service-to-service-calls}
+  VPN_DEFAULT_NETWORK: ${VPN_DEFAULT_NETWORK:-10.66.0.0/16}
+  VPN_DNS: ${VPN_DNS:-1.1.1.1,1.0.0.1}
+  VPN_AGENT_SHARED_SECRET: ${VPN_AGENT_SHARED_SECRET:-change-me-vpn-agent-secret}
+  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+  PAYMENT_PROVIDER_KEY: ${PAYMENT_PROVIDER_KEY:-}
+  PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-change-me}
+  # Must be the real https://<ADMIN_DOMAIN> origin in production — the wildcard-ish
+  # localhost default only works for local dev.
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["http://localhost:3000"]}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vpnservice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-vpnservice}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpnservice}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *python-env
+      BOT_NOTIFY_BASE_URL: http://bot:8801
+    # --proxy-headers/--forwarded-allow-ips=* makes uvicorn trust X-Forwarded-For /
+    # X-Forwarded-Proto from whoever connects to it directly — safe *only* because this
+    # service has no `ports:` mapping to the host, so the only thing that can ever connect
+    # directly is caddy (or another container on this same compose network). Without this,
+    # every request would appear to come from caddy's container IP, silently collapsing
+    # slowapi's per-client rate limiting (see app/core/rate_limit.py) into one shared
+    # bucket for all real clients.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build:
+      context: ./bot
+      dockerfile: ../infrastructure/docker/bot.Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *python-env
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BACKEND_API_BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infrastructure/docker/frontend.Dockerfile
+    restart: unless-stopped
+    environment:
+      # The real https://<API_DOMAIN> origin — the admin panel's browser JS calls this
+      # directly, so it must be publicly reachable (through caddy), not the internal
+      # backend:8000 service name.
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?set to https://<API_DOMAIN>}
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set to the real domain pointed at this host, e.g. api.example.com}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?set to the real domain pointed at this host, e.g. admin.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set to a real address — Let's Encrypt uses it for expiry/revocation notices}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

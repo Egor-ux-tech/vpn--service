@@ -1,0 +1,85 @@
+---
+- name: Install Python, git, and setcap
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - git
+      - libcap2-bin
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the vpn-agent system user (no login, no home)
+  ansible.builtin.user:
+    name: vpn-agent
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Allow the vpn-agent user to manage the wg0 interface without running as root
+  # A plain `setcap` shell call rather than community.general.capabilities — keeps this
+  # role dependent only on ansible-core (no Galaxy collection to install/pin). This is
+  # defense in depth for `wg` invoked outside systemd (e.g. manual debugging); the
+  # AmbientCapabilities line in the systemd unit is what actually grants the service
+  # CAP_NET_ADMIN during normal operation.
+  ansible.builtin.command: setcap cap_net_admin=eip /usr/bin/wg
+  changed_when: true
+
+- name: Create state directory
+  ansible.builtin.file:
+    path: /var/lib/vpn-agent
+    state: directory
+    owner: vpn-agent
+    group: vpn-agent
+    mode: "0750"
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/vpn-agent
+    state: directory
+    mode: "0750"
+    owner: vpn-agent
+    group: vpn-agent
+
+- name: Clone/update the vpn-service repository
+  ansible.builtin.git:
+    repo: "{{ vpn_service_repo_url }}"
+    dest: /opt/vpn-service
+    version: "{{ vpn_service_git_ref }}"
+    force: false
+  notify: Restart vpn-agent
+
+- name: Create the vpn-agent virtualenv and install the package
+  ansible.builtin.pip:
+    name: /opt/vpn-service/vpn
+    virtualenv: /opt/vpn-service/vpn/.venv
+    virtualenv_command: python3 -m venv
+  notify: Restart vpn-agent
+
+- name: Render the vpn-agent environment file
+  ansible.builtin.template:
+    src: vpn-agent.env.j2
+    dest: /etc/vpn-agent/vpn-agent.env
+    owner: vpn-agent
+    group: vpn-agent
+    mode: "0640"
+  no_log: true
+  notify: Restart vpn-agent
+
+- name: Install the vpn-agent systemd unit
+  ansible.builtin.template:
+    src: vpn-agent.service.j2
+    dest: /etc/systemd/system/vpn-agent.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart vpn-agent
+
+- name: Enable and start vpn-agent
+  ansible.builtin.systemd:
+    name: vpn-agent
+    enabled: true
+    state: started
+    daemon_reload: true

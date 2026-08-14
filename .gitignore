@@ -1,0 +1,55 @@
+## Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+!infrastructure/**/*.example.*
+secrets/
+infrastructure/ansible/inventory/hosts.ini
+infrastructure/ansible/group_vars/all.yml
+infrastructure/ansible/**/vault.yml
+
+## WireGuard material — never commit real keys/configs
+*.conf
+!infrastructure/**/*.conf.example
+wg-keys/
+vpn/data/
+
+## Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+## Node / Next.js
+node_modules/
+.next/
+out/
+frontend/.env*.local
+npm-debug.log*
+
+## Docker
+*.pid
+
+## Editors / OS / local tooling
+.vscode/
+.idea/
+.claude/
+.DS_Store
+
+## Logs
+*.log
+logs/
+
+## Alembic local sqlite (dev fallback only)
+*.sqlite3
