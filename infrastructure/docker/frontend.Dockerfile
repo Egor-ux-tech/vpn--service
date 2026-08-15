@@ -14,7 +14,7 @@ RUN npm run build
 
 FROM base AS runner
 ENV NODE_ENV=production
-RUN useradd --create-home --uid 1000 appuser
+RUN useradd --create-home appuser
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
