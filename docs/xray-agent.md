@@ -67,8 +67,13 @@ fake in-process servicer was exercised — see "Known limitations" below).
 
 VLESS + Reality + TCP + `xtls-rprx-vision`, port 443, `shortIds: [""]` (a single empty
 entry, which makes the client-side `sid` parameter always omittable — confirmed
-against the official REALITY spec during the VLESS/Happ research spike). The
-camouflage/target SNI (`xray_reality_camouflage_sni` in
+against the official REALITY spec during the VLESS/Happ research spike). The VLESS
+inbound deliberately does not enable Xray sniffing in the MVP: there is no domain-based
+routing requirement yet, so destination rewriting adds another failure surface without
+a corresponding feature benefit. The `freedom` outbound is explicitly pinned to
+`domainStrategy: UseIPv4` so the node does not unexpectedly select an IPv6 route for
+public destinations when the VPS's IPv6 connectivity is not part of this service's
+transport contract. The camouflage/target SNI (`xray_reality_camouflage_sni` in
 `infrastructure/ansible/group_vars/all.yml.example`) is a **placeholder**
 (`www.example.com`) — choosing a real one is a threat-model/operational decision for
 whoever deploys this, not a technical default; see the comment next to that variable

@@ -43,22 +43,17 @@
   notify: Restart xray
 
 - name: Generate the node's Reality X25519 key pair (idempotent — only runs once)
-  # `xray x25519` prints two lines: "Private key: <b64url>" and "Public key: <b64url>"
-  # (verified against XTLS/Xray-core@main — see docs/xray-agent.md). Only the private
-  # key ever touches disk on this host; the public key is registered in the backend's
-  # admin panel (VLESSServerConfig.reality_public_key), never persisted here beyond
-  # this one debug print.
   ansible.builtin.shell: |
     set -euo pipefail
     /usr/local/bin/xray x25519 > /tmp/xray_x25519_output
-    grep '^Private key:' /tmp/xray_x25519_output | awk '{print $NF}' > /etc/xray/reality_private_key
+    grep '^PrivateKey:' /tmp/xray_x25519_output | awk '{print $2}' > /etc/xray/reality_private_key
+    test -s /etc/xray/reality_private_key
     chmod 600 /etc/xray/reality_private_key
     chown xray:xray /etc/xray/reality_private_key
   args:
     creates: /etc/xray/reality_private_key
     executable: /bin/bash
   no_log: true
-
 - name: Read the generated key pair back for the public-key debug message
   ansible.builtin.shell: |
     set -euo pipefail
@@ -73,14 +68,19 @@
   ansible.builtin.debug:
     msg: >-
       Reality public key for {{ inventory_hostname }}:
-      {{ xray_x25519_readback.stdout_lines | select('search', '^Public key:') | first
-         | regex_replace('^Public key:\s*', '') }}
+      {{ xray_x25519_readback.stdout_lines | select('search', '^Password:') | first
+         | regex_replace('^Password:\s*', '') }}
       — register this VLESS server via the admin panel with this reality_public_key,
       port={{ xray_listen_port }}, sni={{ xray_reality_camouflage_sni }},
       short_ids={{ xray_reality_short_ids }}, and
       xray_agent_base_url=http://{{ inventory_hostname }}:{{ xray_agent_port }}
       before routing any users to it.
-
+- name: Validate rendered Xray configuration before restart
+  ansible.builtin.command:
+    cmd: /usr/local/bin/xray run -test -config /etc/xray/config.json
+  register: xray_config_validation
+  changed_when: false
+  check_mode: false
 - name: Read the Reality private key for the config.json template
   ansible.builtin.slurp:
     src: /etc/xray/reality_private_key
